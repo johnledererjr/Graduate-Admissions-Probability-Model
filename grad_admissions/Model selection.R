@@ -1,0 +1,10 @@
+library(lmtest)
+data = read.csv("Admission_Predict_Ver1.1.csv")
+full_model = lm(Chance.of.Admit ~ GRE.Score + TOEFL.Score + University.Rating + SOP + LOR + CGPA + Research, data)
+summary(full_model)
+add_model = lm(Chance.of.Admit ~ TOEFL.Score + GRE.Score + CGPA + Research + LOR, data)
+summary(add_model)
+n = length(resid(full_model))
+bic_model = step(full_model, direction = "backward", trace = 0, k = log(n))
+
+anova(add_model, full_model)

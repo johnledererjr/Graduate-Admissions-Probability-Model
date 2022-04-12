@@ -1,0 +1,145 @@
+---
+title: "STAT 420 Final Project"
+author: "John Lederer, Hye Rim Ahn, Yirong Cai, Richard Nguyen"
+date: "5/7/2021"
+output:
+  pdf_document: default
+  html_document: default
+---
+John Lederer, lederer3
+
+Hye Rim Ahn, hrahn2
+
+Yirong Cai, yirongx2
+
+Richard Nguyen, rnguyen4
+
+# Introduction
+
+Our report was constructed using data obtained from https://www.kaggle.com/mohansacharya/graduate-admissions; it was originally created by Mohan S Acharya, Asfia Armaan, and Aneeta S Antony for the purpose of predicting admission chances for prospective international graduate students. It contains 7 parameters: GRE score, TOEFL score, university rating, statement of purpose strength, letter of recommendation strength, undergraduate GPA, research experience, and chance of admission. The GRE (Graduate Record Examinations) and TOEFL (Test of English as a Foreign Language) are both standardized tests which measure the aptitude of prospective graduate students. The GRE was scored out of 340, the scores in this dataset ranged from 290 to 340. The TOEFL is intended for non-native english speakers and was scored out of 120 and ranged from 92 to 120. The GRE and TOEFL have changed their scoring method since this data was collected. University rating rates the quality of school attended by a given student out of 5. The students’ statement of purpose and letter of recommendation strength were both rated out of 5. Undergraduate GPA was taken out of 10. Research experience was a categorical variable, students either had it or did not. The students' chances of admission ranged from 0 to 1. 
+
+With this dataset, we aim to build a model which can predict the chance of admission with given attributes. As many universities highly valued diversity, now international students are a very important component of  university students. According to Fall 2017 international statistics from University of Illinois, around 22.6% of all income students are international students where half of them are undergraduate students. With this large number of international students, it becomes necessary to provide help on their graduate school application. As the application process is relatively in a black box, it is very hard to predict the chance of admission before getting the result from the graduate school. Therefore, we would like to build a model that can give a hint to students of their chance of admission to help them to prepare their graduate school admission better. 
+
+
+# Method
+
+Getting Data
+
+```{r}
+data = read.csv("Admission_Predict_Ver1.1.csv")
+head(data)
+```
+First, we compared two additive models.
+
+"Full_model" with all the predictors and "add_model" without predictors with a high individual p-values from the "full_model" summary. By performing backwards BIC model, we noticed that this model also produced the same model as the "add_model" that was created with only the predictors with low individual p-values. 
+
+
+```{r}
+library(lmtest)
+
+full_model = lm(Chance.of.Admit ~ GRE.Score + TOEFL.Score + University.Rating + SOP + LOR + CGPA + Research, data)
+
+add_model = lm(Chance.of.Admit ~ TOEFL.Score + GRE.Score + CGPA + Research + LOR, data)
+
+n = length(resid(full_model))
+bic_model = step(full_model, direction = "backward", trace = 0, k = log(n))
+
+anova(add_model, full_model)
+```
+
+The Anova test failed to reject null, thus preferred the add_model with predictors "SOP" and "University.Rating" excluded. Now, we check the normality and constant variance assumption of this model.
+
+```{r}
+library(lmtest)
+plot(fitted(add_model), resid(add_model), xlab = "Fitted Values", ylab = "Residuals", main = "Residual Plot", pch = 20)
+abline(h = 0, col = "blue")
+qqnorm(resid(add_model), col = "darkgrey")
+bptest(add_model)$p.val
+shapiro.test(resid(add_model))$p.val
+```
+The add_model failed to pass normality and constant variance assumption. However, according to the residual plot, we know that the model is linear. Thus, we decided to apply a response transformation to improve the model. 
+
+```{r}
+library(MASS)
+boxcox(add_model, lambda = seq(1.5, 2.5, by = 0.05), plotit = TRUE)
+box_model = lm((((Chance.of.Admit ^ 2.2) - 1) / 2.2) ~ TOEFL.Score + GRE.Score + CGPA + Research + LOR, data)
+shapiro.test(resid(box_model))
+bptest(box_model)
+qqnorm(resid(add_model), col = "darkgrey")
+summary(box_model)
+```
+The new model with the boxcox transformation passed constant variance assumption test but not the normality assumption. However, by looking at the Normal Q-Q plot, the fit does not seem to be off by a significant amount. This model also had a greater adjusted r squared value. Thus this model is our first candidate model for predicting the chance of admission.  
+
+Instead of taking a different route of creating a new appropriate candidate model, we decided to try a further adjustment on this candidate model and compare the two.
+
+We use the Cook's distance to filter influential points. 
+
+```{r}
+cooks_data =  cooks.distance(box_model)
+cook_box_model = lm((((Chance.of.Admit ^ 2.2) - 1) / 2.2) ~ TOEFL.Score + GRE.Score + CGPA + Research + LOR, data = data, subset = cooks_data <= 4 / length(cooks_data))
+summary(cook_box_model)
+
+shapiro.test(resid(cook_box_model))
+bptest(cook_box_model)	
+plot(fitted(cook_box_model), resid(cook_box_model), xlab = "Fitted Values", ylab = "Residuals", main = "Residual Plot", pch = 20)
+abline(h = 0, col = "blue")
+qqnorm(resid(cook_box_model), col = "darkgrey")
+
+```
+The cook_box_model does not pass both constant variance and normality assumption. However, according to the residual and normal Q-Q plot, the violation does not seem significant. Thus, we will consider the 'cook_box_model' as our second candidate
+
+
+Now, we have two good candidate models 'box_model' and 'cook_box_model'. We compare the two models.
+
+```{r}
+summary(box_model)$adj
+summary(cook_box_model)$adj
+```
+The adjusted r squared value of the cook_box_model seems to be greater than that of the box_model by about 0.04603598.
+
+
+```{r}
+rmse_function = function(model) {
+  sqrt(mean((resid(model) / (1 - hatvalues(model))) ^ 2))
+}
+rmse_function(box_model)
+rmse_function(cook_box_model)
+
+```
+The LOOCV-RMSE of the book_box_model seems to be smaller than that of the box_model by about 0.006569969.
+
+# Results
+
+The model we have chosen as most favorable is as follows:
+
+\[
+\hat{y}_{\text{Chance of Admit}}^{2.2} = -1.627 + 0.002x_{\text{TOEFL}} + 0.001x_{\text{GRE}} + 0.085x_{\text{GPA}} + 0.016x_{\text{Research}} + 0.011x_{\text {LOR}}
+\]
+
+We began with a model using chance of admission as the response and all predictors in the data, then using BIC we attained model with potentially unnecessary predictors removed. Using an ANOVA test we determined that the reduced model better explained the variation in chance of admission. The reduced model however did not meet the constant variance assumption nor the normality assumtion; in attempt to fix this we decided to try a model with a box-cox transformation. The box-cox transformed model met the constant variance assumption but did not meet the normality assumption. In attempt to find a model that passed the normality assumption we decided try the same model, but with outliers removed. We decided points with a Cook's distance of greater than 4/n to be outliers and fit a model with them removed. This unfortunately failed to resolve our non-normality issue. Despite this, we decided it was the model which best described the relationship between chance of admission and the predictors: TOEFL score, GRE score, college GPA, research experience, and letter of recommendation. We came to this conclusion primarily because it had the highest adjusted r-squared value of our models at .893, and because it had the lowest LOOCV-RMSE at about .03.
+
+Here is the summary output of the final model we chose.
+```{r}
+summary(cook_box_model)
+```
+
+Let's look further into the relationship between chance of admission, college GPA and research experience. College GPA increases chance of admission by the largest magnitude per unit increase; having research experience increases the chance of admission significantly.
+
+```{r}
+library(ggplot2)
+ggplot(data = data, aes(x = CGPA, y = Chance.of.Admit, color = Research)) +
+  geom_point() +
+  geom_smooth(method = "lm", col = "purple") +
+  labs(x = "College GPA", y = "Chance of Admission", title = "Chance of Admission vs GPA and Research Experience")
+```
+Interestingly, nearly all students with a relatively high college GPA had research experience. This is logical because students who are involved in research may work harder and be more involved in their coursework.
+
+# Discussion
+
+The goal of this model was to help international students evaluate their chances of being admitted to a graduate program, based on certain factors and variables. After going through multiple candidate models and considering their RMSE and adjusted r values, we were able to conclude that the Box-Cox model without outliers best predicted the chances of being admitted. Overall, when creating the candidate models, we tried to minimize the number of predictors and not over complicate the model in order to better understand our final model in context.
+
+  Despite the normality issues, we determined that a unit increase in college GPA, and having research experience increased the chance of admission the most. After completing our final model, it prompted us to maybe consider other types of admissions in the future as well, such as undergrad admissions or med school acceptances. Another possible modeling project would be employment after graduation. We could use similar predictors as used in this model to predict the length of time it takes for recent graduates to find a job. One limitation of our dataset is that it only revealed a general chance of admission. However, it is well known that the chance of admission for different graduate programs ranges and takes many different variables into perspective. One characteristic difficult to quantify and model is intangibles like personality, communication skills or likeability; how well you perform in an interview, which many graduate programs require, significantly impacts your chances of acceptance. The letter of recommendation variable included in our model indirectly and imperfectly describes this factor, but there may be better ways to do so. For example, we could conduct a study where we ask interviewers to rate the candidates’ performance and compare that with which candidates were ultimately selected.
+
+# Appendix
+
+Not applicable
